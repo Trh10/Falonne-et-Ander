@@ -1662,7 +1662,7 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
         localStorage.setItem('fa_guests', JSON.stringify(guestList));
 
         // Generate QR code pointing to welcome page
-        const siteBase = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
+        const siteBase = 'https://falonne-et-ander.up.railway.app/';
         const welcomeUrl = siteBase + 'bienvenue.html?n=' + encodeURIComponent(name) + '&c=' + encodeURIComponent(ticketCode);
         const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&color=4a3828&bgcolor=fffdf9&data=' + encodeURIComponent(welcomeUrl);
         document.getElementById('ticketQR').src = qrUrl;
