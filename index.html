@@ -1617,6 +1617,18 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
             document.getElementById('ticketQR').src = savedTicket.qrUrl;
             document.getElementById('ticketCode').textContent = savedTicket.code || '';
             if (savedTicket.welcomeUrl) document.getElementById('ticketWelcomeLink').href = savedTicket.welcomeUrl;
+
+            // === SYNC SILENCIEUX : renvoyer les anciennes confirmations ===
+            if (!localStorage.getItem('rsvp_synced')) {
+                const localData = JSON.parse(localStorage.getItem('fa_guests') || '[]');
+                const myEntry = localData.find(g => g.code === savedTicket.code);
+                const payload = myEntry || { name: savedTicket.name, status: 'oui', nb: 1, detail: '', code: savedTicket.code, msg: '' };
+                fetch('/api/guests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).then(() => { localStorage.setItem('rsvp_synced', 'true'); }).catch(() => {});
+            }
         }
     }
 
@@ -1656,10 +1668,15 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
 
         // Auto-add to guest list
         const ticketCode = 'FA-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-        const guestList = JSON.parse(localStorage.getItem('fa_guests') || '[]');
         const detail = guestNames.length > 1 ? guestNames.join(', ') : '';
-        guestList.push({ name: name, status: attendance, nb: parseInt(guests), detail: detail, code: ticketCode, msg: message || '' });
-        localStorage.setItem('fa_guests', JSON.stringify(guestList));
+        const rsvpPayload = { name: name, status: attendance, nb: parseInt(guests), detail: detail, code: ticketCode, msg: message || '' };
+
+        // Envoyer au serveur (mémoire persistante partagée)
+        fetch('/api/guests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(rsvpPayload)
+        }).catch(() => {});
 
         // Generate QR code pointing to welcome page
         const siteBase = 'https://falonne-et-ander.up.railway.app/';
@@ -1690,15 +1707,18 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
     const status = document.getElementById('adminStatus');
     const addBtn = document.getElementById('adminAddBtn');
 
-    function getGuests() {
-        return JSON.parse(localStorage.getItem('fa_guests') || '[]');
-    }
-    function saveGuests(g) {
-        localStorage.setItem('fa_guests', JSON.stringify(g));
+    let cachedGuests = [];
+
+    async function fetchAllGuests() {
+        try {
+            const res = await fetch('/api/guests');
+            cachedGuests = await res.json();
+        } catch { cachedGuests = []; }
+        return cachedGuests;
     }
 
-    function render() {
-        const guests = getGuests();
+    async function render() {
+        const guests = await fetchAllGuests();
         list.innerHTML = '';
         if (guests.length === 0) {
             empty.style.display = '';
@@ -1707,7 +1727,7 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
         }
         empty.style.display = 'none';
         const confirmed = guests.filter(g => g.status === 'oui').length;
-        const total = guests.reduce((sum, g) => sum + (g.nb || 1), 0);
+        const total = guests.reduce((sum, g) => sum + (parseInt(g.nb) || 1), 0);
         count.textContent = confirmed + ' confirmé(s) · ' + total + ' personne(s) au total';
 
         guests.forEach((g, i) => {
@@ -1718,16 +1738,17 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
                 (g.code ? '<span class="admin-guest-code">' + g.code + '</span>' : '') +
                 '</div>' +
                 '<span class="admin-guest-status ' + g.status + '">' + (g.status === 'oui' ? 'Confirmé' : 'Absent') + '</span>' +
-                '<button class="admin-delete" data-idx="' + i + '" title="Supprimer">&times;</button>';
+                '<button class="admin-delete" data-idx="' + i + '" data-code="' + escapeHtml(g.code || '') + '" title="Supprimer">&times;</button>';
             list.appendChild(li);
         });
 
         list.querySelectorAll('.admin-delete').forEach(btn => {
             btn.addEventListener('click', function() {
-                const guests = getGuests();
-                guests.splice(parseInt(this.dataset.idx), 1);
-                saveGuests(guests);
-                render();
+                const code = this.dataset.code;
+                if (code) {
+                    fetch('/api/guests/' + encodeURIComponent(code), { method: 'DELETE' }).catch(() => {});
+                }
+                setTimeout(render, 500);
             });
         });
     }
@@ -1752,11 +1773,15 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
     function addGuest() {
         const name = input.value.trim();
         if (!name) return;
-        const guests = getGuests();
-        guests.push({ name: name, status: status.value, nb: 1 });
-        saveGuests(guests);
+        const code = 'FA-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+        const payload = { name: name, status: status.value, nb: 1, code: code };
+        fetch('/api/guests', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).catch(() => {});
         input.value = '';
-        render();
+        setTimeout(render, 600);
     }
     addBtn.addEventListener('click', addGuest);
     input.addEventListener('keydown', function(e) {
@@ -1797,7 +1822,7 @@ document.getElementById('lightbox').addEventListener('click', function() { this.
         }
 
         // Try ticket code (FA-XXXX)
-        const guests = getGuests();
+        const guests = cachedGuests;
         const found = guests.find(g => g.code && g.code.toUpperCase() === code);
         if (found) {
             verifyResult.className = 'admin-verify-result found';
